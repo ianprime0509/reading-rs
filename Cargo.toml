@@ -12,6 +12,7 @@ unstable = ["serde_derive"]
 serde_codegen = { version = "0.8", optional = true }
 
 [dependencies]
+ansi_term = "0.9"
 clap = "2.19.2"
 serde = "0.8"
 serde_derive = { version = "0.8", optional = true }

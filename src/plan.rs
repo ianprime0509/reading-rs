@@ -3,6 +3,7 @@ use super::{Plan, Entry};
 use std::error::Error as StdError;
 use std::fmt;
 use std::io::{self, Read, BufRead, BufReader};
+use std::slice;
 
 /// Represents an error in working with a `Plan` (e.g. if a nonexistent
 /// entry is accessed, or if there is an IO error in reading a plan
@@ -200,5 +201,10 @@ impl Plan {
     /// at the end of the plan.
     pub fn current_entry(&self) -> Option<&Entry> {
         self.entries.get(self.current_entry)
+    }
+
+    /// Returns an iterator over entries in the plan, of type `&Entry`
+    pub fn entries(&self) -> slice::Iter<Entry> {
+        self.entries.iter()
     }
 }

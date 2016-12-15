@@ -21,6 +21,8 @@ use Plan;
 #[derive(Debug)]
 pub enum Error {
     /// The user's config directory could not be found or deduced.
+    CannotLocateConfig,
+    /// The config directory does not exist (has not been created yet).
     NoConfigDirectory,
     /// The specified plan does not exist (includes the name of the plan).
     NoSuchPlan(String),
@@ -53,7 +55,10 @@ impl fmt::Display for Error {
 impl StdError for Error {
     fn description(&self) -> &str {
         match *self {
-            NoConfigDirectory => "Could not find appropriate plan storage directory",
+            CannotLocateConfig => "Could not find appropriate plan storage directory",
+            NoConfigDirectory => {
+                "Plan storage directory does not exist yet (you need to add some plans first)"
+            }
             NoSuchPlan(_) => "No such plan exists",
             PlanAlreadyExists(_) => "Plan already exists",
             Io(ref e) => e.description(),
@@ -106,7 +111,7 @@ impl Iterator for Plans {
 /// Returns an iterator over the plans in the plan directory if possible,
 /// or an error if this cannot be done.
 pub fn plans() -> Result<Plans, Error> {
-    let dir = plans_dir()?;
+    let dir = plans_dir_must_exist()?;
 
     Ok(Plans { read_dir: fs::read_dir(&dir).map_err(|e| Io(e))? })
 }
@@ -118,7 +123,7 @@ pub fn plans_dir() -> Result<PathBuf, Error> {
             d.push(".reading");
             Ok(d)
         }
-        None => Err(NoConfigDirectory),
+        None => Err(CannotLocateConfig),
     }
 }
 
@@ -133,9 +138,20 @@ fn plans_dir_ensure() -> Result<PathBuf, Error> {
     }
 }
 
+/// Returns the location of the plans directory, returning an error
+/// if it doesn't exist.
+fn plans_dir_must_exist() -> Result<PathBuf, Error> {
+    let path = plans_dir()?;
+    if !path.exists() || !path.is_dir() {
+        Err(NoConfigDirectory)
+    } else {
+        Ok(path)
+    }
+}
+
 /// Reads the plan with the given name
 pub fn read_plan(name: &str) -> Result<Plan, Error> {
-    let mut filename = plans_dir()?;
+    let mut filename = plans_dir_must_exist()?;
     filename.push(name);
     filename.set_extension("plan.json");
 
@@ -174,4 +190,18 @@ pub fn overwrite_plan(p: &Plan) -> Result<(), Error> {
     let mut f = File::create(filename).map_err(|e| Io(e))?;
 
     serde_json::to_writer(&mut f, &p).map_err(|e| Json(e))
+}
+
+/// Attempts to remove the plan with the given name, returning
+/// an error if it doesn't exist.
+pub fn remove_plan(name: &str) -> Result<(), Error> {
+    let mut filename = plans_dir_must_exist()?;
+    filename.push(name);
+    filename.set_extension("plan.json");
+
+    if !filename.exists() {
+        Err(NoSuchPlan(name.to_owned()))
+    } else {
+        fs::remove_file(&filename).map_err(|e| Io(e))
+    }
 }
