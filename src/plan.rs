@@ -203,6 +203,16 @@ impl Plan {
         &self.name
     }
 
+    /// Returns whether the plan is cyclic.
+    pub fn is_cyclic(&self) -> bool {
+        self.cyclic
+    }
+
+    /// Sets whether the plan is cyclic.
+    pub fn set_cyclic(&mut self, cyclic: bool) {
+        self.cyclic = cyclic;
+    }
+
     /// Returns the current entry number of the plan (as a 1-based index).
     pub fn current_entry_number(&self) -> usize {
         self.current_entry + 1

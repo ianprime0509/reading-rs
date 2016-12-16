@@ -163,6 +163,8 @@ pub fn main() {
 /// The `add` subcommand logic
 fn add(m: &ArgMatches, style_set: StyleSet) {
     let filename = Path::new(m.value_of("FILENAME").unwrap());
+    let cyclic = m.is_present("cyclic");
+
     // Get the name of the plan; either provided explicitly or
     // deduced from the file name
     let name = m.value_of("name").unwrap_or(match filename.file_stem() {
@@ -186,7 +188,7 @@ fn add(m: &ArgMatches, style_set: StyleSet) {
             return;
         }
     };
-    let plan = match Plan::from_text(name, &f) {
+    let mut plan = match Plan::from_text(name, &f) {
         Ok(p) => p,
         Err(e) => {
             println!("{}",
@@ -194,6 +196,10 @@ fn add(m: &ArgMatches, style_set: StyleSet) {
             return;
         }
     };
+
+    if cyclic {
+        plan.set_cyclic(true);
+    }
 
     // Now add the plan to the plans directory
     if let Err(e) = files::add_plan(&plan) {
