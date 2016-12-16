@@ -71,12 +71,31 @@ pub fn main() {
             .arg(Arg::with_name("cyclic")
                 .short("c")
                 .long("cyclic")
-                .help("Create a cyclic plan")))
+                .help("Create a cyclic plan"))
+            .after_help("The expected input format is a plain text file, with each line \
+                         representing the title of an entry in the plan. Optionally, a title  \
+                         may be followed by a description, which is given on the line(s) \
+                         directly following and marked as such by any level of indentation. If \
+                         no name is provided for the plan, the filename (without the extension) \
+                         will be used as the name."))
         .subcommand(SubCommand::with_name("remove")
             .about("Removes a reading plan from the collection")
             .arg(Arg::with_name("PLAN")
                 .help("The name of the plan to remove")
                 .required(true)))
+        .subcommand(SubCommand::with_name("export")
+            .about("Exports a reading plan to a plain text file")
+            .arg(Arg::with_name("PLAN")
+                .help("The name of the plan to export")
+                .required(true))
+            .arg(Arg::with_name("output")
+                .short("o")
+                .long("output")
+                .value_name("OUTPUT")
+                .help("The output filename")
+                .takes_value(true))
+            .after_help("If no output filename is specified, the filename will be '(name of \
+                         plan) + .plan'."))
         .subcommand(SubCommand::with_name("list").about("Lists all installed reading plans"))
         .subcommand(SubCommand::with_name("view")
             .about("Views the current entry (and optionally more) of the specified plan")
@@ -87,9 +106,36 @@ pub fn main() {
                 .short("c")
                 .long("count")
                 .value_name("COUNT")
-                .help("The number of following entries to view (default 1)")
+                .default_value("1")
+                .help("The number of following entries to view")
                 .takes_value(true)))
-        .after_help("Longer explanation goes here")
+        .subcommand(SubCommand::with_name("next")
+            .about("Moves the specified plan to the next entry")
+            .arg(Arg::with_name("PLAN")
+                .help("The plan to change")
+                .required(true))
+            .arg(Arg::with_name("count")
+                .short("c")
+                .long("count")
+                .value_name("COUNT")
+                .default_value("1")
+                .help("The number of entries to move forward")
+                .takes_value(true)))
+        .subcommand(SubCommand::with_name("previous")
+            .about("Moves the specified plan to the previous entry")
+            .arg(Arg::with_name("PLAN")
+                .help("The plan to change")
+                .required(true))
+            .arg(Arg::with_name("count")
+                .short("c")
+                .long("count")
+                .value_name("COUNT")
+                .default_value("1")
+                .help("The number of entries to move backward")
+                .takes_value(true)))
+        .after_help("reading is a reading plan manager, but can also be used to manage other \
+                     sorts of schedules or plans. To get started, use `reading add` to add a \
+                     plan, and check `reading help add` for the expected input format.")
         .get_matches();
 
     // Whether we should disable the fancy ANSI terminal text
@@ -105,10 +151,12 @@ pub fn main() {
     match matches.subcommand() {
         ("add", Some(sub_m)) => add(sub_m, style_set),
         ("remove", Some(sub_m)) => remove(sub_m, style_set),
-        ("list", Some(sub_m)) => list(sub_m, style_set),
+        ("export", Some(sub_m)) => export(sub_m, style_set),
+        ("list", Some(_)) => list(style_set),
         ("view", Some(sub_m)) => view(sub_m, style_set),
-        _ => println!("{}", Colour::White.bold().paint("Test text")),
-
+        ("next", Some(sub_m)) => next(sub_m, style_set, true),
+        ("previous", Some(sub_m)) => next(sub_m, style_set, false),
+        _ => list(style_set),
     }
 }
 
@@ -169,8 +217,59 @@ fn remove(m: &ArgMatches, style_set: StyleSet) {
     }
 }
 
+/// The `export` subcommand logic.
+fn export(m: &ArgMatches, style_set: StyleSet) {
+    let name = m.value_of("PLAN").unwrap();
+    let plan = match files::read_plan(name) {
+        Ok(p) => p,
+        Err(e) => {
+            println!("{}",
+                     style_set.error.paint(format!("Error reading plan: {}", e)));
+            return;
+        }
+    };
+    // Construct default output filename if we don't have one provided
+    let output = match m.value_of("output") {
+        Some(o) => o.to_owned(),
+        None => plan.name().to_owned() + ".plan",
+    };
+
+    // Open the output file for writing, with an error if it already exists
+    let path = Path::new(&output);
+    if path.exists() {
+        println!("{}",
+                 style_set.error
+                     .paint(format!("The output file '{}' already exists and will not be \
+                                     overwritten",
+                                    output)));
+        return;
+    }
+    let file = match File::create(path) {
+        Ok(f) => f,
+        Err(e) => {
+            println!("{}",
+                     style_set.error
+                         .paint(format!("Could not open file: {}", e)));
+            return;
+        }
+    };
+
+    // Now write the plan to the file
+    match plan.to_text(file) {
+        Ok(_) => {
+            println!("{}",
+                     style_set.normal
+                         .paint(format!("Wrote plan '{}' to '{}'", plan.name(), output)))
+        }
+        Err(e) => {
+            println!("{}",
+                     style_set.error.paint(format!("Could not write to output file: {}", e)))
+        }
+    }
+}
+
 /// The `list` subcommand logic
-fn list(_m: &ArgMatches, style_set: StyleSet) {
+fn list(style_set: StyleSet) {
     let plans = match files::plans() {
         Ok(p) => p,
         Err(e) => {
@@ -193,10 +292,18 @@ fn list(_m: &ArgMatches, style_set: StyleSet) {
         }
     }
 
+    // If there are no plans, say so
+    if plan_list.is_empty() {
+        println!("{}",
+                 style_set.normal
+                     .paint("No plans are installed; you can add some by running `reading add` \
+                             (use `reading help add` for more information)"));
+        return;
+    }
     // Now print out all the data
     for (name, current, len) in plan_list {
-        // Check for end of plan (current == len indicates this)
-        if current == len {
+        // Check for end of plan (current > len indicates this)
+        if current > len {
             println!("{} {}",
                      style_set.title.paint(name),
                      style_set.normal.paint("(end of plan)"));
@@ -221,17 +328,13 @@ fn list(_m: &ArgMatches, style_set: StyleSet) {
 /// The `view` subcommand logic
 fn view(m: &ArgMatches, style_set: StyleSet) {
     let name = m.value_of("PLAN").unwrap();
-    let count = match m.value_of("count") {
-        None => 1,
-        Some(num) => {
-            match num.parse() {
-                Ok(n) => n,
-                Err(_) => {
-                    println!("{}",
-                             style_set.error.paint("Invalid numeric argument to `--count`"));
-                    return;
-                }
-            }
+    // We can unwrap this because we set a default value
+    let count = match m.value_of("count").unwrap().parse() {
+        Ok(n) => n,
+        Err(_) => {
+            println!("{}",
+                     style_set.error.paint("Invalid numeric argument to `--count`"));
+            return;
         }
     };
 
@@ -244,6 +347,14 @@ fn view(m: &ArgMatches, style_set: StyleSet) {
         }
     };
 
+    // If we're at the end of the plan, indicate this
+    if plan.is_ended() {
+        println!("{}",
+                 style_set.normal
+                     .paint("Plan has ended (use `reading previous` to revert to an earlier \
+                             entry)"));
+        return;
+    }
     // Print out the given number of entries, starting at the current one
     for (n, entry) in plan.entries().skip(plan.current_entry_number() - 1).take(count).enumerate() {
         let label = match n {
@@ -259,6 +370,63 @@ fn view(m: &ArgMatches, style_set: StyleSet) {
             println!("{:20} {}",
                      "",
                      style_set.description.paint(entry.description()));
+        }
+    }
+}
+
+/// The `next` subcommand logic.
+/// The `next` argument specifies whether the next operation is actually desired;
+/// set this to false to get the `previous` subcommand logic, since it's
+/// almost identical.
+fn next(m: &ArgMatches, style_set: StyleSet, next: bool) {
+    let name = m.value_of("PLAN").unwrap();
+    let count = match m.value_of("count").unwrap().parse() {
+        Ok(n) => n,
+        Err(_) => {
+            println!("{}",
+                     style_set.error.paint("Invalid numeric argument to `--count`"));
+            return;
+        }
+    };
+
+    let mut plan = match files::read_plan(name) {
+        Ok(p) => p,
+        Err(e) => {
+            println!("{}",
+                     style_set.error.paint(format!("Error reading plan: {}", e)));
+            return;
+        }
+    };
+
+    // Go to next entry
+    let old_entry = if plan.is_ended() {
+        "end".to_owned()
+    } else {
+        plan.current_entry_number().to_string()
+    };
+    if next {
+        plan.next(count);
+    } else {
+        plan.previous(count);
+    }
+    let new_entry = if plan.is_ended() {
+        "end".to_owned()
+    } else {
+        plan.current_entry_number().to_string()
+    };
+
+    // Resave the plan after making this change
+    match files::overwrite_plan(&plan) {
+        Ok(_) => {
+            println!("{}",
+                     style_set.normal.paint(format!("Changed current entry of '{}': {} -> {}",
+                                                    plan.name(),
+                                                    old_entry,
+                                                    new_entry)))
+        }
+        Err(e) => {
+            println!("{}",
+                     style_set.error.paint(format!("Could not save changes to plan: {}", e)))
         }
     }
 }

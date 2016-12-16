@@ -2,7 +2,7 @@ use super::{Plan, Entry};
 
 use std::error::Error as StdError;
 use std::fmt;
-use std::io::{self, Read, BufRead, BufReader};
+use std::io::{self, Read, BufRead, BufReader, Write, BufWriter};
 use std::slice;
 
 /// Represents an error in working with a `Plan` (e.g. if a nonexistent
@@ -144,6 +144,22 @@ impl Plan {
         }
     }
 
+    /// Writes the plan using the standard plain text format to the specified writer.
+    /// This format is documented in the documentation for `from_text`.
+    pub fn to_text<T: Write>(&self, output: T) -> Result<(), Error> {
+        // Buffer writes
+        let mut w = BufWriter::new(output);
+
+        for e in self.entries() {
+            writeln!(w, "{}", e.title()).map_err(|e| Io(e))?;
+            if !e.description().is_empty() {
+                writeln!(w, "    {}", e.description()).map_err(|e| Io(e))?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Advances the plan by the given number of entries.
     ///
     /// For a cyclic plan, this will wrap around; for an acyclic plan,
@@ -195,6 +211,11 @@ impl Plan {
     /// Returns the number of entries in the plan.
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Returns whether this plan is at its end (for an acyclic plan).
+    pub fn is_ended(&self) -> bool {
+        self.current_entry_number() > self.len()
     }
 
     /// Returns the current `Entry` of the plan, or `None` if we are
