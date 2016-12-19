@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use serde_json;
 
-use Plan;
+use super::Plan;
 use super::errors::*;
 
 /// An iterator over all the plans in the plan directory.

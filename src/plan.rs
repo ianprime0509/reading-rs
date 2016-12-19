@@ -1,7 +1,13 @@
 use std::io::{Read, BufRead, BufReader, Write, BufWriter};
 use std::slice;
 
-use super::{Plan, Entry};
+// Bring in Serde types
+#[cfg(feature = "serde_derive")]
+include!("serde_types.in.rs");
+
+#[cfg(feature = "serde_codegen")]
+include!(concat!(env!("OUT_DIR"), "/serde_types.rs"));
+
 use super::errors::*;
 
 impl Entry {

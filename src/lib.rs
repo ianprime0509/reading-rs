@@ -10,12 +10,6 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 
-#[cfg(feature = "serde_derive")]
-include!("serde_types.in.rs");
-
-#[cfg(feature = "serde_codegen")]
-include!(concat!(env!("OUT_DIR"), "/serde_types.rs"));
-
 #[macro_use]
 extern crate error_chain;
 
@@ -70,6 +64,8 @@ pub use errors::*;
 
 pub mod plan;
 pub mod files;
+
+pub use plan::{Plan, Entry};
 
 #[cfg(test)]
 mod tests {
