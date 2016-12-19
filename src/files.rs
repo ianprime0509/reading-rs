@@ -6,66 +6,14 @@
 //! the extension `.plan.json`.
 
 use std::env;
-use std::error::Error as StdError;
-use std::fmt;
 use std::fs::{self, File, ReadDir};
-use std::io;
 use std::iter::Iterator;
 use std::path::PathBuf;
 
 use serde_json;
 
 use Plan;
-
-/// Represents an error when working with plan files.
-#[derive(Debug)]
-pub enum Error {
-    /// The user's config directory could not be found or deduced.
-    CannotLocateConfig,
-    /// The config directory does not exist (has not been created yet).
-    NoConfigDirectory,
-    /// The specified plan does not exist (includes the name of the plan).
-    NoSuchPlan(String),
-    /// The specified plan already exists (includes the name of the plan).
-    /// This may be an error if, for example, the user tries to add
-    /// a plan with the same name as one previously existing.
-    PlanAlreadyExists(String),
-    /// An error occurred when interacting with the filesystem or
-    /// when reading or writing from/to a file.
-    Io(io::Error),
-    /// An error occurred when trying to serialize or deserialize
-    /// JSON data.
-    Json(serde_json::Error),
-}
-
-use self::Error::*;
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            NoSuchPlan(ref s) => write!(f, "Plan '{}' does not exist", s),
-            PlanAlreadyExists(ref s) => write!(f, "Plan '{}' already exists", s),
-            Io(ref e) => write!(f, "{}", e),
-            Json(ref e) => write!(f, "{}", e),
-            _ => write!(f, "{}", self.description()),
-        }
-    }
-}
-
-impl StdError for Error {
-    fn description(&self) -> &str {
-        match *self {
-            CannotLocateConfig => "Could not find appropriate plan storage directory",
-            NoConfigDirectory => {
-                "Plan storage directory does not exist yet (you need to add some plans first)"
-            }
-            NoSuchPlan(_) => "No such plan exists",
-            PlanAlreadyExists(_) => "Plan already exists",
-            Io(ref e) => e.description(),
-            Json(ref e) => e.description(),
-        }
-    }
-}
+use super::errors::*;
 
 /// An iterator over all the plans in the plan directory.
 ///
@@ -78,61 +26,61 @@ pub struct Plans {
 }
 
 impl Iterator for Plans {
-    type Item = Result<Plan, Error>;
+    type Item = Result<Plan>;
 
-    fn next(&mut self) -> Option<Result<Plan, Error>> {
+    fn next(&mut self) -> Option<Result<Plan>> {
         let entry = match self.read_dir.next() {
             Some(e) => e,
             None => return None,
         };
-        let path = match entry {
-            Ok(p) => p.path(),
-            Err(e) => return Some(Err(Io(e))),
+        let path = match entry.chain_err(|| ErrorKind::Io("could not read directory item".into())) {
+            Ok(e) => e.path(),
+            Err(e) => return Some(Err(e)),
         };
 
         // Make sure we skip over things that aren't files or
         // don't have the proper extension ('.plan.json')
-        if !path.is_file() ||
-           !path.to_str().expect("Path is not valid UTF8").ends_with(".plan.json") {
+        let path_str = match path.to_str() {
+            Some(s) => s.to_owned(),
+            None => return Some(Err(ErrorKind::Utf8("path is not valid utf8".into()).into())),
+        };
+        if !path.is_file() || !path_str.ends_with(".plan.json") {
             return self.next();
         }
         // Now try to open the plan and read in its data
-        let f = match File::open(path) {
+        let f = match File::open(&path).chain_err(|| ErrorKind::Io(format!("could not open file '{}'", path.display()))) {
             Ok(f) => f,
-            Err(e) => return Some(Err(Io(e))),
+            Err(e) => return Some(Err(e)),
         };
-        match serde_json::from_reader(&f) {
-            Ok(p) => Some(Ok(p)),
-            Err(e) => Some(Err(Json(e))),
-        }
+        Some(serde_json::from_reader(&f).chain_err(|| ErrorKind::Json(format!("json error in file '{}'", path.display()))))
     }
 }
 
 /// Returns an iterator over the plans in the plan directory if possible,
 /// or an error if this cannot be done.
-pub fn plans() -> Result<Plans, Error> {
+pub fn plans() -> Result<Plans> {
     let dir = plans_dir_must_exist()?;
 
-    Ok(Plans { read_dir: fs::read_dir(&dir).map_err(|e| Io(e))? })
+    Ok(Plans { read_dir: fs::read_dir(&dir).chain_err(|| ErrorKind::Io("could not read from plans directory".into()))? })
 }
 
 /// Returns the location of the plans directory if possible.
-pub fn plans_dir() -> Result<PathBuf, Error> {
+pub fn plans_dir() -> Result<PathBuf> {
     match env::home_dir() {
         Some(mut d) => {
             d.push(".reading");
             Ok(d)
         }
-        None => Err(CannotLocateConfig),
+        None => Err(ErrorKind::CannotLocateConfig.into()),
     }
 }
 
 /// Returns the location of the plans directory, ensuring that it
 /// actually exists (the directory will be created if it does not).
-fn plans_dir_ensure() -> Result<PathBuf, Error> {
+fn plans_dir_ensure() -> Result<PathBuf> {
     let path = plans_dir()?;
     if !path.exists() || !path.is_dir() {
-        fs::create_dir(&path).map(|_| path).map_err(|e| Io(e))
+        fs::create_dir(&path).map(|_| path).chain_err(|| ErrorKind::Io("could not create plans directory".into()))
     } else {
         Ok(path)
     }
@@ -140,68 +88,68 @@ fn plans_dir_ensure() -> Result<PathBuf, Error> {
 
 /// Returns the location of the plans directory, returning an error
 /// if it doesn't exist.
-fn plans_dir_must_exist() -> Result<PathBuf, Error> {
+fn plans_dir_must_exist() -> Result<PathBuf> {
     let path = plans_dir()?;
     if !path.exists() || !path.is_dir() {
-        Err(NoConfigDirectory)
+        Err(ErrorKind::NoConfigDirectory.into())
     } else {
         Ok(path)
     }
 }
 
 /// Reads the plan with the given name
-pub fn read_plan(name: &str) -> Result<Plan, Error> {
+pub fn read_plan(name: &str) -> Result<Plan> {
     let mut filename = plans_dir_must_exist()?;
     filename.push(name);
     filename.set_extension("plan.json");
 
     if !filename.exists() {
-        return Err(NoSuchPlan(name.into()));
+        return Err(ErrorKind::PlanDoesNotExist(name.into()).into());
     }
     // We need to map the error into the correct type (wrap it in the
     // Io variant of our custom error)
-    let f = File::open(filename).map_err(|e| Io(e))?;
+    let f = File::open(filename).chain_err(|| ErrorKind::Io("could not open plan file".into()))?;
 
-    serde_json::from_reader(f).map_err(|e| Json(e))
+    serde_json::from_reader(f).chain_err(|| ErrorKind::Json("json error in plan file".into()))
 }
 
 /// Writes the given plan to the plans directory, and will return
 /// an error if the plan already exists there.
-pub fn add_plan(p: &Plan) -> Result<(), Error> {
+pub fn add_plan(p: &Plan) -> Result<()> {
     let mut filename = plans_dir_ensure()?;
     filename.push(p.name());
     filename.set_extension("plan.json");
 
     if filename.exists() {
-        return Err(PlanAlreadyExists(p.name().into()));
+        return Err(ErrorKind::PlanAlreadyExists(p.name().into()).into());
     }
-    let mut f = File::create(filename).map_err(|e| Io(e))?;
+    let mut f = File::create(filename).chain_err(|| ErrorKind::Io("could not create plan file".into()))?;
 
-    serde_json::to_writer(&mut f, &p).map_err(|e| Json(e))
+    serde_json::to_writer(&mut f, &p).chain_err(|| ErrorKind::Json("could not serialize plan to json".into()))
 }
 
 /// Writes the given plan to the plans directory, overwriting it if
 /// it already exists.
-pub fn overwrite_plan(p: &Plan) -> Result<(), Error> {
+pub fn overwrite_plan(p: &Plan) -> Result<()> {
     let mut filename = plans_dir_ensure()?;
     filename.push(p.name());
     filename.set_extension("plan.json");
 
-    let mut f = File::create(filename).map_err(|e| Io(e))?;
+    let mut f = File::create(filename).chain_err(|| ErrorKind::Io("could not overwrite plan file".into()))?;
 
-    serde_json::to_writer(&mut f, &p).map_err(|e| Json(e))
+    serde_json::to_writer(&mut f, &p).chain_err(|| ErrorKind::Json("could not serialize plan to json".into()))
 }
 
 /// Attempts to remove the plan with the given name, returning
 /// an error if it doesn't exist.
-pub fn remove_plan(name: &str) -> Result<(), Error> {
+pub fn remove_plan(name: &str) -> Result<()> {
     let mut filename = plans_dir_must_exist()?;
     filename.push(name);
     filename.set_extension("plan.json");
 
     if !filename.exists() {
-        Err(NoSuchPlan(name.to_owned()))
+        Err(ErrorKind::PlanDoesNotExist(name.to_owned()).into())
     } else {
-        fs::remove_file(&filename).map_err(|e| Io(e))
+        fs::remove_file(&filename).chain_err(|| ErrorKind::Io("could not remove plan file".into()))
     }
 }

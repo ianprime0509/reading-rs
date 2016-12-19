@@ -1,42 +1,8 @@
-use super::{Plan, Entry};
-
-use std::error::Error as StdError;
-use std::fmt;
-use std::io::{self, Read, BufRead, BufReader, Write, BufWriter};
+use std::io::{Read, BufRead, BufReader, Write, BufWriter};
 use std::slice;
 
-/// Represents an error in working with a `Plan` (e.g. if a nonexistent
-/// entry is accessed, or if there is an IO error in reading a plan
-/// from a file).
-#[derive(Debug)]
-pub enum Error {
-    /// An IO error was encountered while processing. Contains the
-    /// base `io::Error` that describes the problem.
-    Io(io::Error),
-    /// There was an error in the text input format (e.g. the given
-    /// input was empty).
-    TextFormat(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            TextFormat(ref s) => write!(f, "{}", s),
-            Io(ref e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl StdError for Error {
-    fn description(&self) -> &str {
-        match *self {
-            TextFormat(_) => "Error in text input format",
-            Io(ref e) => e.description(),
-        }
-    }
-}
-
-use self::Error::*;
+use super::{Plan, Entry};
+use super::errors::*;
 
 impl Entry {
     /// Returns an `Entry` with a title and no description.
@@ -73,7 +39,7 @@ impl Plan {
     /// Note that any amount of indentation (tabs and/or spaces) will
     /// be considered as a description, and that a blank line will terminate
     /// any entry.
-    pub fn from_text<T: Read>(name: &str, input: T) -> Result<Plan, Error> {
+    pub fn from_text<T: Read>(name: &str, input: T) -> Result<Plan> {
         // Buffer the reader so that we can read by lines
         let r = BufReader::new(input);
         let mut entries = Vec::new();
@@ -84,10 +50,9 @@ impl Plan {
             // Check for any IO errors in reading the line
             // Also, trim any whitespace to the right of the line,
             // since it doesn't matter.
-            let l = match l {
-                Ok(l) => l.trim_right().to_owned(),
-                Err(e) => return Err(Io(e)),
-            };
+            let l = l.chain_err(|| ErrorKind::Io("could not read line".into()))?
+                .trim_right()
+                .to_owned();
             // Skip blank lines, but consider them to be the end of an entry if present
             if l.is_empty() {
                 if let Some(e) = current_entry {
@@ -111,9 +76,11 @@ impl Plan {
                         e.description += l.trim_left();
                     }
                     &mut None => {
-                        return Err(TextFormat(format!("Description on line {} does not \
-                                                       correspond to any entry",
-                                                      n + 1)));
+                        // So that rustfmt will work :P
+                        return Err(ErrorKind::TextFormat(format!("description on line {} does \
+                                                                  not correspond to any entry",
+                                                                 n + 1))
+                            .into());
                     }
                 }
             } else {
@@ -133,7 +100,7 @@ impl Plan {
         }
 
         if entries.is_empty() {
-            Err(TextFormat("Cannot construct an empty plan".into()))
+            Err(ErrorKind::TextFormat("cannot construct an empty plan".into()).into())
         } else {
             Ok(Plan {
                 name: name.into(),
@@ -146,14 +113,14 @@ impl Plan {
 
     /// Writes the plan using the standard plain text format to the specified writer.
     /// This format is documented in the documentation for `from_text`.
-    pub fn to_text<T: Write>(&self, output: T) -> Result<(), Error> {
+    pub fn to_text<T: Write>(&self, output: T) -> Result<()> {
         // Buffer writes
         let mut w = BufWriter::new(output);
 
         for e in self.entries() {
-            writeln!(w, "{}", e.title()).map_err(|e| Io(e))?;
+            writeln!(w, "{}", e.title()).chain_err(|| ErrorKind::Io("could not write to text output".into()))?;
             if !e.description().is_empty() {
-                writeln!(w, "    {}", e.description()).map_err(|e| Io(e))?;
+                writeln!(w, "    {}", e.description()).chain_err(|| ErrorKind::Io("could not write to text output".into()))?;
             }
         }
 

@@ -2,6 +2,8 @@ extern crate reading;
 
 extern crate ansi_term;
 extern crate clap;
+#[macro_use]
+extern crate error_chain;
 
 use std::fs::File;
 use std::path::Path;
@@ -10,10 +12,12 @@ use ansi_term::{Colour, Style};
 use clap::{Arg, ArgMatches, App, AppSettings, SubCommand};
 
 use reading::{files, Plan};
+use reading::errors::*;
 
 /// Describes all the styles that can be used in printing text.
 /// This can be used for custom themes eventually maybe?
 /// Mostly just good for disabling custom formatting.
+#[derive(Debug, Clone)]
 struct StyleSet {
     /// Normal text
     normal: Style,
@@ -72,11 +76,8 @@ pub fn main() {
                 .short("c")
                 .long("cyclic")
                 .help("Create a cyclic plan"))
-            .after_help("The expected input format is a plain text file, with each line \
-                         representing the title of an entry in the plan. Optionally, a title  \
-                         may be followed by a description, which is given on the line(s) \
-                         directly following and marked as such by any level of indentation. If \
-                         no name is provided for the plan, the filename (without the extension) \
+            .after_help("The expected input format is a plain text file, with each line representing the title of an entry in the plan. Optionally, a title  may be followed by a description, \
+                         which is given on the line(s) directly following and marked as such by any level of indentation. If no name is provided for the plan, the filename (without the extension) \
                          will be used as the name."))
         .subcommand(SubCommand::with_name("remove")
             .about("Removes a reading plan from the collection")
@@ -94,8 +95,7 @@ pub fn main() {
                 .value_name("OUTPUT")
                 .help("The output filename")
                 .takes_value(true))
-            .after_help("If no output filename is specified, the filename will be '(name of \
-                         plan) + .plan'."))
+            .after_help("If no output filename is specified, the filename will be '(name of plan) + .plan'."))
         .subcommand(SubCommand::with_name("list").about("Lists all installed reading plans"))
         .subcommand(SubCommand::with_name("view")
             .about("Views the current entry (and optionally more) of the specified plan")
@@ -133,9 +133,8 @@ pub fn main() {
                 .default_value("1")
                 .help("The number of entries to move backward")
                 .takes_value(true)))
-        .after_help("reading is a reading plan manager, but can also be used to manage other \
-                     sorts of schedules or plans. To get started, use `reading add` to add a \
-                     plan, and check `reading help add` for the expected input format.")
+        .after_help("reading is a reading plan manager, but can also be used to manage other sorts of schedules or plans. To get started, use `reading add` to add a plan, and check `reading help \
+                     add` for the expected input format.")
         .get_matches();
 
     // Whether we should disable the fancy ANSI terminal text
@@ -147,8 +146,28 @@ pub fn main() {
         StyleSet::fancy()
     };
 
+    // Handle errors nicely
+    if let Err(ref e) = run(matches, &style_set) {
+        println!("{}", style_set.error.paint(format!("Error: {}", e)));
+
+        for e in e.iter().skip(1) {
+            println!("{}", style_set.error.paint(format!("Caused by: {}", e)));
+        }
+
+        if let Some(backtrace) = e.backtrace() {
+            println!("{}",
+                     style_set.error.paint(format!("Backtrace: {:?}", backtrace)));
+        }
+
+        std::process::exit(1);
+    }
+}
+
+/// The main program logic.
+/// Each subcommand should do its own printing, except for errors, which are returned.
+fn run(m: ArgMatches, style_set: &StyleSet) -> Result<()> {
     // Run the appropriate subcommand
-    match matches.subcommand() {
+    match m.subcommand() {
         ("add", Some(sub_m)) => add(sub_m, style_set),
         ("remove", Some(sub_m)) => remove(sub_m, style_set),
         ("export", Some(sub_m)) => export(sub_m, style_set),
@@ -160,80 +179,52 @@ pub fn main() {
     }
 }
 
-/// The `add` subcommand logic
-fn add(m: &ArgMatches, style_set: StyleSet) {
+/// The `add` subcommand logic.
+fn add(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     let filename = Path::new(m.value_of("FILENAME").unwrap());
     let cyclic = m.is_present("cyclic");
 
     // Get the name of the plan; either provided explicitly or
     // deduced from the file name
     let name = m.value_of("name").unwrap_or(match filename.file_stem() {
-        Some(n) => n.to_str().expect("Invalid UTF8 in filename"),
+        Some(n) => n.to_str().ok_or(Error::from_kind(ErrorKind::Utf8("invalid utf8 in filename".into())))?,
         None => {
-            println!("{}",
-                     style_set.error
-                         .paint(format!("Could not deduce plan name from filename '{}'",
-                                        filename.display())));
-            return;
+            bail!("could not deduce plan name from filename '{}'",
+                  filename.display())
         }
     });
 
     // Try to open the file and parse a plan from it
-    let f = match File::open(&filename) {
-        Ok(f) => f,
-        Err(e) => {
-            println!("{}",
-                     style_set.error
-                         .paint(format!("Error opening file {}: {}", filename.display(), e)));
-            return;
-        }
-    };
-    let mut plan = match Plan::from_text(name, &f) {
-        Ok(p) => p,
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Error parsing plan: {}", e)));
-            return;
-        }
-    };
+    let f = File::open(&filename).chain_err(|| ErrorKind::Io(format!("could not open file {}", filename.display())))?;
+    let mut plan = Plan::from_text(name, &f).chain_err(|| "could not parse plan")?;
 
     if cyclic {
         plan.set_cyclic(true);
     }
 
     // Now add the plan to the plans directory
-    if let Err(e) = files::add_plan(&plan) {
-        println!("{}",
-                 style_set.error.paint(format!("Error adding plan: {}", e)));
-    } else {
-        println!("{}", style_set.normal.paint(format!("Added plan {}", name)));
-    }
+    files::add_plan(&plan).chain_err(|| "could not add plan")?;
+
+    println!("{}", style_set.normal.paint(format!("Added plan {}", name)));
+    Ok(())
 }
 
 /// The `remove` subcommand logic
-fn remove(m: &ArgMatches, style_set: StyleSet) {
+fn remove(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     let name = m.value_of("PLAN").unwrap();
 
-    if let Err(e) = files::remove_plan(name) {
-        println!("{}",
-                 style_set.error.paint(format!("Error removing plan: {}", e)));
-    } else {
-        println!("{}",
-                 style_set.normal.paint(format!("Removed plan {}", name)));
-    }
+    files::remove_plan(name).chain_err(|| "could not remove plan")?;
+
+    println!("{}",
+             style_set.normal.paint(format!("Removed plan {}", name)));
+    Ok(())
 }
 
 /// The `export` subcommand logic.
-fn export(m: &ArgMatches, style_set: StyleSet) {
+fn export(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     let name = m.value_of("PLAN").unwrap();
-    let plan = match files::read_plan(name) {
-        Ok(p) => p,
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Error reading plan: {}", e)));
-            return;
-        }
-    };
+    let plan = files::read_plan(name).chain_err(|| "could not read plan")?;
+
     // Construct default output filename if we don't have one provided
     let output = match m.value_of("output") {
         Some(o) => o.to_owned(),
@@ -243,47 +234,22 @@ fn export(m: &ArgMatches, style_set: StyleSet) {
     // Open the output file for writing, with an error if it already exists
     let path = Path::new(&output);
     if path.exists() {
-        println!("{}",
-                 style_set.error
-                     .paint(format!("The output file '{}' already exists and will not be \
-                                     overwritten",
-                                    output)));
-        return;
+        bail!("output file '{}' already exists; will not overwrite",
+              output);
     }
-    let file = match File::create(path) {
-        Ok(f) => f,
-        Err(e) => {
-            println!("{}",
-                     style_set.error
-                         .paint(format!("Could not open file: {}", e)));
-            return;
-        }
-    };
+    let file = File::create(path).chain_err(|| ErrorKind::Io("could not open output file".into()))?;
 
     // Now write the plan to the file
-    match plan.to_text(file) {
-        Ok(_) => {
-            println!("{}",
-                     style_set.normal
-                         .paint(format!("Wrote plan '{}' to '{}'", plan.name(), output)))
-        }
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Could not write to output file: {}", e)))
-        }
-    }
+    plan.to_text(file).chain_err(|| "could not write to output file")?;
+    println!("{}",
+             style_set.normal
+                 .paint(format!("Wrote plan '{}' to '{}'", plan.name(), output)));
+    Ok(())
 }
 
 /// The `list` subcommand logic
-fn list(style_set: StyleSet) {
-    let plans = match files::plans() {
-        Ok(p) => p,
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Could not open plans folder: {}", e)));
-            return;
-        }
-    };
+fn list(style_set: &StyleSet) -> Result<()> {
+    let plans = files::plans()?;
 
     // Contains the name of the plan, the current entry number,
     // and the total number of entries
@@ -304,7 +270,7 @@ fn list(style_set: StyleSet) {
                  style_set.normal
                      .paint("No plans are installed; you can add some by running `reading add` \
                              (use `reading help add` for more information)"));
-        return;
+        return Ok(());
     }
     // Now print out all the data
     for (name, current, len) in plan_list {
@@ -329,29 +295,17 @@ fn list(style_set: StyleSet) {
                      style_set.error.paint(format!("{} plans could not be read", n)))
         }
     }
+
+    Ok(())
 }
 
 /// The `view` subcommand logic
-fn view(m: &ArgMatches, style_set: StyleSet) {
+fn view(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     let name = m.value_of("PLAN").unwrap();
     // We can unwrap this because we set a default value
-    let count = match m.value_of("count").unwrap().parse() {
-        Ok(n) => n,
-        Err(_) => {
-            println!("{}",
-                     style_set.error.paint("Invalid numeric argument to `--count`"));
-            return;
-        }
-    };
+    let count = m.value_of("count").unwrap().parse().chain_err(|| "invalid numeric argument to `--count`")?;
 
-    let plan = match files::read_plan(name) {
-        Ok(p) => p,
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Error reading plan: {}", e)));
-            return;
-        }
-    };
+    let plan = files::read_plan(name).chain_err(|| "could not read plan")?;
 
     // If we're at the end of the plan, indicate this
     if plan.is_ended() {
@@ -359,7 +313,7 @@ fn view(m: &ArgMatches, style_set: StyleSet) {
                  style_set.normal
                      .paint("Plan has ended (use `reading previous` to revert to an earlier \
                              entry)"));
-        return;
+        return Ok(());
     }
     // Print out the given number of entries, starting at the current one
     for (n, entry) in plan.entries().skip(plan.current_entry_number() - 1).take(count).enumerate() {
@@ -378,31 +332,19 @@ fn view(m: &ArgMatches, style_set: StyleSet) {
                      style_set.description.paint(entry.description()));
         }
     }
+
+    Ok(())
 }
 
 /// The `next` subcommand logic.
 /// The `next` argument specifies whether the next operation is actually desired;
 /// set this to false to get the `previous` subcommand logic, since it's
 /// almost identical.
-fn next(m: &ArgMatches, style_set: StyleSet, next: bool) {
+fn next(m: &ArgMatches, style_set: &StyleSet, next: bool) -> Result<()> {
     let name = m.value_of("PLAN").unwrap();
-    let count = match m.value_of("count").unwrap().parse() {
-        Ok(n) => n,
-        Err(_) => {
-            println!("{}",
-                     style_set.error.paint("Invalid numeric argument to `--count`"));
-            return;
-        }
-    };
+    let count = m.value_of("count").unwrap().parse().chain_err(|| "invalid numeric argument to `--count`")?;
 
-    let mut plan = match files::read_plan(name) {
-        Ok(p) => p,
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Error reading plan: {}", e)));
-            return;
-        }
-    };
+    let mut plan = files::read_plan(name).chain_err(|| "could not read plan")?;
 
     // Go to next entry
     let old_entry = if plan.is_ended() {
@@ -422,17 +364,12 @@ fn next(m: &ArgMatches, style_set: StyleSet, next: bool) {
     };
 
     // Resave the plan after making this change
-    match files::overwrite_plan(&plan) {
-        Ok(_) => {
-            println!("{}",
-                     style_set.normal.paint(format!("Changed current entry of '{}': {} -> {}",
-                                                    plan.name(),
-                                                    old_entry,
-                                                    new_entry)))
-        }
-        Err(e) => {
-            println!("{}",
-                     style_set.error.paint(format!("Could not save changes to plan: {}", e)))
-        }
-    }
+    files::overwrite_plan(&plan).chain_err(|| "could not overwrite plan")?;
+    println!("{}",
+             style_set.normal.paint(format!("Changed current entry of '{}': {} -> {}",
+                                            plan.name(),
+                                            old_entry,
+                                            new_entry)));
+
+    Ok(())
 }
