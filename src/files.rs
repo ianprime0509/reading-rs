@@ -5,15 +5,21 @@
 //! All plan files should be stored in the plans directory with
 //! the extension `.plan.json`.
 
-use std::env;
 use std::fs::{self, File, ReadDir};
 use std::iter::Iterator;
 use std::path::PathBuf;
 
+use app_dirs::{self, AppInfo, AppDataType, AppDirsError};
 use serde_json;
 
 use super::Plan;
 use super::errors::*;
+
+/// The information for app_dirs
+const APP_INFO: AppInfo = AppInfo {
+    name: "reading",
+    author: "Ian Johnson",
+};
 
 /// An iterator over all the plans in the plan directory.
 ///
@@ -66,12 +72,11 @@ pub fn plans() -> Result<Plans> {
 
 /// Returns the location of the plans directory if possible.
 pub fn plans_dir() -> Result<PathBuf> {
-    match env::home_dir() {
-        Some(mut d) => {
-            d.push(".reading");
-            Ok(d)
-        }
-        None => Err(ErrorKind::CannotLocateConfig.into()),
+    match app_dirs::get_app_dir(AppDataType::UserData, &APP_INFO, "plans") {
+        Ok(p) => Ok(p),
+        Err(AppDirsError::NotSupported) => Err(ErrorKind::CannotLocateConfig.into()),
+        Err(AppDirsError::Io(e)) => Err(e).chain_err(|| ErrorKind::Io("could not find plans directory".into())),
+        Err(AppDirsError::InvalidAppInfo) => panic!("invalid app info"),
     }
 }
 

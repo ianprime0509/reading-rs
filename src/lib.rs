@@ -10,6 +10,7 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 
+extern crate app_dirs;
 #[macro_use]
 extern crate error_chain;
 

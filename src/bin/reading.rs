@@ -249,7 +249,16 @@ fn export(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
 
 /// The `list` subcommand logic
 fn list(style_set: &StyleSet) -> Result<()> {
-    let plans = files::plans()?;
+    let plans = match files::plans() {
+        Ok(p) => p,
+        Err(Error(ErrorKind::NoConfigDirectory, _)) => {
+            println!("{}",
+                     style_set.normal
+                         .paint("Could not find plans directory; this probably means you haven't run the program yet. To add plans, use `reading add` or run `reading help add` for help.".to_owned()));
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
 
     // Contains the name of the plan, the current entry number,
     // and the total number of entries
