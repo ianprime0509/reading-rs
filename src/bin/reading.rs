@@ -51,6 +51,22 @@ impl StyleSet {
     }
 }
 
+/// Returns styled text (using a format string syntax)
+macro_rules! style {
+    ($style:expr, $($arg:tt)*) => {
+        {{
+            $style.paint(format!( $($arg)*) )
+        }}
+    }
+}
+
+/// Prints a line of text in the given style
+macro_rules! styleln {
+    ($style:expr, $($arg:tt)*) => {
+        println!("{}", style!($style, $($arg)*))
+    }
+}
+
 pub fn main() {
     let matches = App::new("reading")
         .version("0.1.0")
@@ -148,15 +164,14 @@ pub fn main() {
 
     // Handle errors nicely
     if let Err(ref e) = run(matches, &style_set) {
-        println!("{}", style_set.error.paint(format!("Error: {}", e)));
+        styleln!(style_set.error, "Error: {}", e);
 
         for e in e.iter().skip(1) {
-            println!("{}", style_set.error.paint(format!("Caused by: {}", e)));
+            styleln!(style_set.error, "Caused by: {}", e);
         }
 
         if let Some(backtrace) = e.backtrace() {
-            println!("{}",
-                     style_set.error.paint(format!("Backtrace: {:?}", backtrace)));
+            styleln!(style_set.error, "Backtrace: {:?}", backtrace);
         }
 
         std::process::exit(1);
@@ -205,7 +220,7 @@ fn add(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     // Now add the plan to the plans directory
     files::add_plan(&plan).chain_err(|| "could not add plan")?;
 
-    println!("{}", style_set.normal.paint(format!("Added plan {}", name)));
+    styleln!(style_set.normal, "Added plan {}", name);
     Ok(())
 }
 
@@ -215,8 +230,7 @@ fn remove(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
 
     files::remove_plan(name).chain_err(|| "could not remove plan")?;
 
-    println!("{}",
-             style_set.normal.paint(format!("Removed plan {}", name)));
+    styleln!(style_set.normal, "Removed plan {}", name);
     Ok(())
 }
 
@@ -241,9 +255,10 @@ fn export(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
 
     // Now write the plan to the file
     plan.to_text(file).chain_err(|| "could not write to output file")?;
-    println!("{}",
-             style_set.normal
-                 .paint(format!("Wrote plan '{}' to '{}'", plan.name(), output)));
+    styleln!(style_set.normal,
+             "Wrote plan '{}' to '{}'",
+             plan.name(),
+             output);
     Ok(())
 }
 
@@ -252,9 +267,8 @@ fn list(style_set: &StyleSet) -> Result<()> {
     let plans = match files::plans() {
         Ok(p) => p,
         Err(Error(ErrorKind::NoConfigDirectory, _)) => {
-            println!("{}",
-                     style_set.normal
-                         .paint("Could not find plans directory; this probably means you haven't run the program yet. To add plans, use `reading add` or run `reading help add` for help.".to_owned()));
+            styleln!(style_set.normal,
+                     "Could not find plans directory; this probably means you haven't run the program yet. To add plans, use `reading add` or run `reading help add` for help.");
             return Ok(());
         }
         Err(e) => return Err(e),
@@ -275,10 +289,8 @@ fn list(style_set: &StyleSet) -> Result<()> {
 
     // If there are no plans, say so
     if plan_list.is_empty() {
-        println!("{}",
-                 style_set.normal
-                     .paint("No plans are installed; you can add some by running `reading add` \
-                             (use `reading help add` for more information)"));
+        styleln!(style_set.normal,
+                 "No plans are installed; you can add some by running `reading add` (use `reading help add` for more information)");
         return Ok(());
     }
     // Now print out all the data
@@ -286,23 +298,24 @@ fn list(style_set: &StyleSet) -> Result<()> {
         // Check for end of plan (current > len indicates this)
         if current > len {
             println!("{} {}",
-                     style_set.title.paint(name),
-                     style_set.normal.paint("(end of plan)"));
+                     style!(style_set.title, "{}", name),
+                     style!(style_set.normal, "(end of plan)"));
         } else {
             println!("{} {}",
-                     style_set.title.paint(name),
-                     style_set.normal.paint(format!("(entry {} of {})", current, len)));
+                     style!(style_set.title, "{}", name),
+                     style!(style_set.normal, "(entry {} of {})", current, len));
+            println!("{} {}",
+                     style!(style_set.title, "{}", name),
+                     style!(style_set.normal, "(entry {} of {})", current, len));
         }
     }
 
     // Output any failures
     match failures {
         0 => {}
-        1 => println!("{}", style_set.error.paint("1 plan could not be read")),
-        n @ _ => {
-            println!("{}",
-                     style_set.error.paint(format!("{} plans could not be read", n)))
-        }
+        1 => styleln!(style_set.error, "{}", "1 plan could not be read"),
+        n @ _ => styleln!(style_set.error, "{} plans could not be read", n),
+
     }
 
     Ok(())
@@ -318,10 +331,8 @@ fn view(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
 
     // If we're at the end of the plan, indicate this
     if plan.is_ended() {
-        println!("{}",
-                 style_set.normal
-                     .paint("Plan has ended (use `reading previous` to revert to an earlier \
-                             entry)"));
+        styleln!(style_set.normal,
+                 "Plan has ended (use `reading previous` to revert to an earlier entry)");
         return Ok(());
     }
     // Print out the given number of entries, starting at the current one
@@ -333,12 +344,10 @@ fn view(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
         };
 
         println!("{} {}",
-                 style_set.normal.paint(format!("{:20}", label)),
-                 style_set.title.paint(entry.title()));
+                 style!(style_set.normal, "{:20}", label),
+                 style!(style_set.title, "{}", entry.title()));
         if !entry.description().is_empty() {
-            println!("{:20} {}",
-                     "",
-                     style_set.description.paint(entry.description()));
+            styleln!(style_set.description, "{:20} {}", "", entry.description());
         }
     }
 
@@ -374,11 +383,11 @@ fn next(m: &ArgMatches, style_set: &StyleSet, next: bool) -> Result<()> {
 
     // Resave the plan after making this change
     files::overwrite_plan(&plan).chain_err(|| "could not overwrite plan")?;
-    println!("{}",
-             style_set.normal.paint(format!("Changed current entry of '{}': {} -> {}",
-                                            plan.name(),
-                                            old_entry,
-                                            new_entry)));
+    styleln!(style_set.normal,
+             "Changed current entry of '{}': {} -> {}",
+             plan.name(),
+             old_entry,
+             new_entry);
 
     Ok(())
 }
