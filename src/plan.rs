@@ -1,3 +1,7 @@
+//! This module provides the basic `Plan` type and a variety of ways
+//! to work with them, including reading and writing them from/to plain
+//! text files, via the `from_text` and `to_text` methods, respectively.
+
 use std::io::{Read, BufRead, BufReader, Write, BufWriter};
 use std::slice;
 
@@ -36,6 +40,17 @@ impl Entry {
 }
 
 impl Plan {
+    /// Constructs a plan from a list of entries, setting the current entry
+    /// to the first one. The resulting plan will be acyclic.
+    pub fn from_entries(name: &str, entries: Vec<Entry>) -> Plan {
+        Plan {
+            name: name.to_owned(),
+            cyclic: false,
+            current_entry: 0,
+            entries: entries,
+        }
+    }
+
     /// Attempts to construct a plan from plain text input.
     ///
     /// The expected format of a plan in plain text is a series of
@@ -45,6 +60,9 @@ impl Plan {
     /// Note that any amount of indentation (tabs and/or spaces) will
     /// be considered as a description, and that a blank line will terminate
     /// any entry.
+    ///
+    /// The resulting plan will be acyclic; this can be changed after creation
+    /// with the `set_cyclic` method.
     pub fn from_text<T: Read>(name: &str, input: T) -> Result<Plan> {
         // Buffer the reader so that we can read by lines
         let r = BufReader::new(input);
@@ -108,12 +126,7 @@ impl Plan {
         if entries.is_empty() {
             Err(ErrorKind::TextFormat("cannot construct an empty plan".into()).into())
         } else {
-            Ok(Plan {
-                name: name.into(),
-                cyclic: false,
-                current_entry: 0,
-                entries: entries,
-            })
+            Ok(Plan::from_entries(name, entries))
         }
     }
 
@@ -182,11 +195,19 @@ impl Plan {
     }
 
     /// Sets whether the plan is cyclic.
+    ///
+    /// If the plan is at its end when this is set, the current entry
+    /// will be set to the first entry in the plan.
     pub fn set_cyclic(&mut self, cyclic: bool) {
         self.cyclic = cyclic;
+        if self.cyclic && self.current_entry == self.len() {
+            self.current_entry = 0;
+        }
     }
 
     /// Returns the current entry number of the plan (as a 1-based index).
+    /// If the plan is at its end, this will be 1 more than the length of
+    /// the plan.
     pub fn current_entry_number(&self) -> usize {
         self.current_entry + 1
     }

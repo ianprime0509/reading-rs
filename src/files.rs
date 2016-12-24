@@ -1,9 +1,14 @@
-//! Provides functions for working with plan files stored in
+//! This module provides functions for working with plan files stored in
 //! a special directory (including a function to find and create
-//! this directory).
+//! this directory). This directory is determined by the `app_dirs` crate,
+//! which will return a path based on the operating system (Windows,
+//! OS X, or Linux).
 //!
 //! All plan files should be stored in the plans directory with
-//! the extension `.plan.json`.
+//! the extension `.plan.json`. Files with a different extension
+//! will not be recognized, e.g. by the `plans` iterator function.
+//! In general, this should not be a problem; the provided methods
+//! for adding/removing plans will provide this extension automatically.
 
 use std::fs::{self, File, ReadDir};
 use std::iter::Iterator;
@@ -64,6 +69,10 @@ impl Iterator for Plans {
 
 /// Returns an iterator over the plans in the plan directory if possible,
 /// or an error if this cannot be done.
+///
+/// As noted in the module documentation, plans must have the extension
+/// `.plan.json` to be recognized; the iterator will pass over any files
+/// that do not have this extension.
 pub fn plans() -> Result<Plans> {
     let dir = plans_dir_must_exist()?;
 
@@ -76,6 +85,8 @@ pub fn plans_dir() -> Result<PathBuf> {
         Ok(p) => Ok(p),
         Err(AppDirsError::NotSupported) => Err(ErrorKind::CannotLocateConfig.into()),
         Err(AppDirsError::Io(e)) => Err(e).chain_err(|| ErrorKind::Io("could not find plans directory".into())),
+        // This should properly be a panic, since there really isn't any way
+        // this can happen (unless `app_dirs` changes in a breaking way).
         Err(AppDirsError::InvalidAppInfo) => panic!("invalid app info"),
     }
 }
@@ -102,7 +113,10 @@ fn plans_dir_must_exist() -> Result<PathBuf> {
     }
 }
 
-/// Reads the plan with the given name
+/// Reads the plan with the given name.
+///
+/// The filename of the plan must be `{name}.plan.json`, or it will
+/// not be recognized.
 pub fn read_plan(name: &str) -> Result<Plan> {
     let mut filename = plans_dir_must_exist()?;
     filename.push(name);
@@ -118,7 +132,7 @@ pub fn read_plan(name: &str) -> Result<Plan> {
     serde_json::from_reader(f).chain_err(|| ErrorKind::Json("json error in plan file".into()))
 }
 
-/// Writes the given plan to the plans directory, and will return
+/// Writes the given plan to the plans directory, or will return
 /// an error if the plan already exists there.
 pub fn add_plan(p: &Plan) -> Result<()> {
     let mut filename = plans_dir_ensure()?;
