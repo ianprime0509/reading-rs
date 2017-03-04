@@ -92,8 +92,11 @@ pub fn main() {
                 .short("c")
                 .long("cyclic")
                 .help("Create a cyclic plan"))
-            .after_help("The expected input format is a plain text file, with each line representing the title of an entry in the plan. Optionally, a title  may be followed by a description, \
-                         which is given on the line(s) directly following and marked as such by any level of indentation. If no name is provided for the plan, the filename (without the extension) \
+            .after_help("The expected input format is a plain text file, with each line \
+                         representing the title of an entry in the plan. Optionally, a title  \
+                         may be followed by a description, which is given on the line(s) \
+                         directly following and marked as such by any level of indentation. If \
+                         no name is provided for the plan, the filename (without the extension) \
                          will be used as the name."))
         .subcommand(SubCommand::with_name("remove")
             .about("Removes a reading plan from the collection")
@@ -111,7 +114,8 @@ pub fn main() {
                 .value_name("OUTPUT")
                 .help("The output filename")
                 .takes_value(true))
-            .after_help("If no output filename is specified, the filename will be '(name of plan) + .plan'."))
+            .after_help("If no output filename is specified, the filename will be '(name of \
+                         plan) + .plan'."))
         .subcommand(SubCommand::with_name("list").about("Lists all installed reading plans"))
         .subcommand(SubCommand::with_name("view")
             .about("Views the current entry (and optionally more) of the specified plan")
@@ -149,8 +153,9 @@ pub fn main() {
                 .default_value("1")
                 .help("The number of entries to move backward")
                 .takes_value(true)))
-        .after_help("reading is a reading plan manager, but can also be used to manage other sorts of schedules or plans. To get started, use `reading add` to add a plan, and check `reading help \
-                     add` for the expected input format.")
+        .after_help("reading is a reading plan manager, but can also be used to manage other \
+                     sorts of schedules or plans. To get started, use `reading add` to add a \
+                     plan, and check `reading help add` for the expected input format.")
         .get_matches();
 
     // Whether we should disable the fancy ANSI terminal text
@@ -202,7 +207,9 @@ fn add(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     // Get the name of the plan; either provided explicitly or
     // deduced from the file name
     let name = m.value_of("name").unwrap_or(match filename.file_stem() {
-        Some(n) => n.to_str().ok_or(Error::from_kind(ErrorKind::Utf8("invalid utf8 in filename".into())))?,
+        Some(n) => {
+            n.to_str().ok_or(Error::from_kind(ErrorKind::Utf8("invalid utf8 in filename".into())))?
+        }
         None => {
             bail!("could not deduce plan name from filename '{}'",
                   filename.display())
@@ -268,7 +275,9 @@ fn list(style_set: &StyleSet) -> Result<()> {
         Ok(p) => p,
         Err(Error(ErrorKind::NoConfigDirectory, _)) => {
             styleln!(style_set.normal,
-                     "Could not find plans directory; this probably means you haven't run the program yet. To add plans, use `reading add` or run `reading help add` for help.");
+                     "Could not find plans directory; this probably means you haven't run the \
+                      program yet. To add plans, use `reading add` or run `reading help add` for \
+                      help.");
             return Ok(());
         }
         Err(e) => return Err(e),
@@ -290,7 +299,8 @@ fn list(style_set: &StyleSet) -> Result<()> {
     // If there are no plans, say so
     if plan_list.is_empty() {
         styleln!(style_set.normal,
-                 "No plans are installed; you can add some by running `reading add` (use `reading help add` for more information)");
+                 "No plans are installed; you can add some by running `reading add` (use \
+                  `reading help add` for more information)");
         return Ok(());
     }
     // Now print out all the data
@@ -325,7 +335,8 @@ fn list(style_set: &StyleSet) -> Result<()> {
 fn view(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
     let name = m.value_of("PLAN").unwrap();
     // We can unwrap this because we set a default value
-    let count = m.value_of("count").unwrap().parse().chain_err(|| "invalid numeric argument to `--count`")?;
+    let count =
+        m.value_of("count").unwrap().parse().chain_err(|| "invalid numeric argument to `--count`")?;
 
     let plan = files::read_plan(name).chain_err(|| "could not read plan")?;
 
@@ -360,7 +371,8 @@ fn view(m: &ArgMatches, style_set: &StyleSet) -> Result<()> {
 /// almost identical.
 fn next(m: &ArgMatches, style_set: &StyleSet, next: bool) -> Result<()> {
     let name = m.value_of("PLAN").unwrap();
-    let count = m.value_of("count").unwrap().parse().chain_err(|| "invalid numeric argument to `--count`")?;
+    let count =
+        m.value_of("count").unwrap().parse().chain_err(|| "invalid numeric argument to `--count`")?;
 
     let mut plan = files::read_plan(name).chain_err(|| "could not read plan")?;
 

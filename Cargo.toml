@@ -1,21 +1,13 @@
 [package]
 name = "reading"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Ian Johnson <ianprime0509@gmail.com>"]
-build = "build.rs"
-
-[features]
-default = ["serde_codegen"]
-unstable = ["serde_derive"]
-
-[build-dependencies]
-serde_codegen = { version = "0.8", optional = true }
 
 [dependencies]
 ansi_term = "0.9"
 app_dirs = "1.1.1"
 clap = "2.19.2"
-error-chain = "0.7.1"
-serde = "0.8"
-serde_derive = { version = "0.8", optional = true }
-serde_json = "0.8"
+error-chain = "0.10.0"
+serde = "0.9"
+serde_derive = "0.9"
+serde_json = "0.9"

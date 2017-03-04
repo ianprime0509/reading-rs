@@ -16,13 +16,9 @@
 // For `error_chain!`
 #![recursion_limit = "1024"]
 
-#![cfg_attr(feature = "serde_derive", feature(proc_macro))]
-
-#[cfg(feature = "serde_derive")]
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-
-extern crate serde;
 extern crate serde_json;
 
 extern crate app_dirs;

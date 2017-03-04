@@ -44,10 +44,11 @@ impl Iterator for Plans {
             Some(e) => e,
             None => return None,
         };
-        let path = match entry.chain_err(|| ErrorKind::Io("could not read directory item".into())) {
-            Ok(e) => e.path(),
-            Err(e) => return Some(Err(e)),
-        };
+        let path =
+            match entry.chain_err(|| ErrorKind::Io("could not read directory item".into())) {
+                Ok(e) => e.path(),
+                Err(e) => return Some(Err(e)),
+            };
 
         // Make sure we skip over things that aren't files or
         // don't have the proper extension ('.plan.json')
@@ -59,11 +60,13 @@ impl Iterator for Plans {
             return self.next();
         }
         // Now try to open the plan and read in its data
-        let f = match File::open(&path).chain_err(|| ErrorKind::Io(format!("could not open file '{}'", path.display()))) {
+        let f = match File::open(&path)
+            .chain_err(|| ErrorKind::Io(format!("could not open file '{}'", path.display()))) {
             Ok(f) => f,
             Err(e) => return Some(Err(e)),
         };
-        Some(serde_json::from_reader(&f).chain_err(|| ErrorKind::Json(format!("json error in file '{}'", path.display()))))
+        Some(serde_json::from_reader(&f)
+            .chain_err(|| ErrorKind::Json(format!("json error in file '{}'", path.display()))))
     }
 }
 
@@ -84,7 +87,9 @@ pub fn plans_dir() -> Result<PathBuf> {
     match app_dirs::get_app_dir(AppDataType::UserData, &APP_INFO, "plans") {
         Ok(p) => Ok(p),
         Err(AppDirsError::NotSupported) => Err(ErrorKind::CannotLocateConfig.into()),
-        Err(AppDirsError::Io(e)) => Err(e).chain_err(|| ErrorKind::Io("could not find plans directory".into())),
+        Err(AppDirsError::Io(e)) => {
+            Err(e).chain_err(|| ErrorKind::Io("could not find plans directory".into()))
+        }
         // This should properly be a panic, since there really isn't any way
         // this can happen (unless `app_dirs` changes in a breaking way).
         Err(AppDirsError::InvalidAppInfo) => panic!("invalid app info"),
@@ -96,7 +101,9 @@ pub fn plans_dir() -> Result<PathBuf> {
 fn plans_dir_ensure() -> Result<PathBuf> {
     let path = plans_dir()?;
     if !path.exists() || !path.is_dir() {
-        fs::create_dir(&path).map(|_| path).chain_err(|| ErrorKind::Io("could not create plans directory".into()))
+        fs::create_dir(&path)
+            .map(|_| path)
+            .chain_err(|| ErrorKind::Io("could not create plans directory".into()))
     } else {
         Ok(path)
     }
@@ -142,9 +149,11 @@ pub fn add_plan(p: &Plan) -> Result<()> {
     if filename.exists() {
         return Err(ErrorKind::PlanAlreadyExists(p.name().into()).into());
     }
-    let mut f = File::create(filename).chain_err(|| ErrorKind::Io("could not create plan file".into()))?;
+    let mut f =
+        File::create(filename).chain_err(|| ErrorKind::Io("could not create plan file".into()))?;
 
-    serde_json::to_writer(&mut f, &p).chain_err(|| ErrorKind::Json("could not serialize plan to json".into()))
+    serde_json::to_writer(&mut f, &p)
+        .chain_err(|| ErrorKind::Json("could not serialize plan to json".into()))
 }
 
 /// Writes the given plan to the plans directory, overwriting it if
@@ -154,9 +163,11 @@ pub fn overwrite_plan(p: &Plan) -> Result<()> {
     filename.push(p.name());
     filename.set_extension("plan.json");
 
-    let mut f = File::create(filename).chain_err(|| ErrorKind::Io("could not overwrite plan file".into()))?;
+    let mut f =
+        File::create(filename).chain_err(|| ErrorKind::Io("could not overwrite plan file".into()))?;
 
-    serde_json::to_writer(&mut f, &p).chain_err(|| ErrorKind::Json("could not serialize plan to json".into()))
+    serde_json::to_writer(&mut f, &p)
+        .chain_err(|| ErrorKind::Json("could not serialize plan to json".into()))
 }
 
 /// Attempts to remove the plan with the given name, returning
